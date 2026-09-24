@@ -55,6 +55,11 @@ export default function AdminPage() {
   // Authentication State with Lazy Initializers
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("logout") === "1" || params.get("lock") === "1") {
+      logoutAdminUser();
+      return false;
+    }
     return isCurrentAdminAuthenticated();
   });
   const [loginUser, setLoginUser] = useState("");
@@ -216,6 +221,16 @@ export default function AdminPage() {
     }, 12000);
     return () => clearInterval(interval);
   }, [isAuthenticated, autoPolling, loadRequests]);
+
+  // Clean up URL query parameters if present
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("logout") === "1" || params.get("lock") === "1") {
+        window.history.replaceState({}, "", "/admin");
+      }
+    }
+  }, []);
 
   // Handle Admin Login
   const handleInlineLogin = (e: React.FormEvent) => {

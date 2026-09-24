@@ -136,7 +136,18 @@ export function isCurrentAdminAuthenticated(): boolean {
     const raw = localStorage.getItem(STORAGE_ADMIN_SESSION);
     if (!raw) return false;
     const session = JSON.parse(raw);
-    return session.role === "admin";
+    if (session.role !== "admin") return false;
+
+    // Session expiry: 8 hours
+    if (session.loginAt) {
+      const loginTime = new Date(session.loginAt).getTime();
+      const now = Date.now();
+      if (now - loginTime > 8 * 60 * 60 * 1000) {
+        logoutAdminUser();
+        return false;
+      }
+    }
+    return true;
   } catch {
     return false;
   }
