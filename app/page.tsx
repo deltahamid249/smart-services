@@ -45,6 +45,6 @@ return <>
 
 <section className="section"><div className="container"><div className="cta"><h2>لديك طلب تقني مختلف؟</h2><p>اكتب لنا ما تريد، وسنحدد لك الحل المناسب.</p><Link href="/request" className="btn btn-primary">اكتب طلبك الآن</Link></div></div></section>
 
-<footer className="footer"><div className="container footer-inner"><div><strong>الحلول التقنية الذكية</strong><br/>خدمات تقنية ورقمية عن بُعد</div><div>جميع الحقوق محفوظة © {new Date().getFullYear()}</div></div></footer>
+<footer className="footer"><div className="container footer-inner"><div><strong>الحلول التقنية الذكية</strong><br/>خدمات تقنية ورقمية عن بُعد</div><div style={{ display: "flex", alignItems: "center", gap: "16px" }}><span>جميع الحقوق محفوظة © {new Date().getFullYear()}</span><Link href="/admin" style={{ color: "#64748b", fontSize: "12px" }}>بوابة الإدارة</Link></div></div></footer>
 </>
 }
