@@ -13,7 +13,7 @@ export default function Home(){
 return <>
 <header className="header"><div className="container nav">
 <Link href="/" className="logo">الحلول <span>التقنية الذكية</span></Link>
-<nav className="navlinks"><Link href="/">الرئيسية</Link><Link href="/services">الخدمات</Link><Link href="/request">طلب خدمة</Link><Link href="/auth/login">تسجيل الدخول</Link></nav>
+<nav className="navlinks"><Link href="/">الرئيسية</Link><Link href="/services">الخدمات</Link><Link href="/request">طلب خدمة</Link></nav>
 <Link href="/request" className="btn btn-primary mobile-only">طلب خدمة</Link>
 </div></header>
 

@@ -2,6 +2,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 export type ServiceRequest = {
   id: string;
+  customer_id?: string | null;
   name: string;
   whatsapp: string;
   service: string;
@@ -10,10 +11,10 @@ export type ServiceRequest = {
   date: string;
   admin_notes?: string;
   final_file_url?: string;
+  tracking_token?: string;
   source?: "supabase" | "local";
 };
 
-const STORAGE_KEY_CONFIG = "smart_supabase_config";
 const STORAGE_KEY_REQUESTS = "smart_requests";
 const BROADCAST_CHANNEL_NAME = "smart_requests_channel";
 
@@ -23,42 +24,10 @@ export interface SupabaseConfig {
 }
 
 export function getStoredSupabaseConfig(): SupabaseConfig {
-  if (typeof window === "undefined") {
-    return {
-      url: process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-    };
-  }
-
-  const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-  if (envUrl && envKey) {
-    return { url: envUrl, anonKey: envKey };
-  }
-
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_CONFIG);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed.url && parsed.anonKey) {
-        return parsed;
-      }
-    }
-  } catch {
-    // fallback
-  }
-
-  return { url: "", anonKey: "" };
-}
-
-export function saveSupabaseConfig(url: string, anonKey: string): void {
-  if (typeof window !== "undefined") {
-    localStorage.setItem(
-      STORAGE_KEY_CONFIG,
-      JSON.stringify({ url: url.trim(), anonKey: anonKey.trim() })
-    );
-  }
+  return {
+    url: (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim(),
+    anonKey: (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "").trim(),
+  };
 }
 
 let cachedClient: SupabaseClient | null = null;
@@ -67,6 +36,7 @@ let lastUsedKey = "";
 
 export function getSupabaseClient(): SupabaseClient | null {
   const config = getStoredSupabaseConfig();
+
   if (!config.url || !config.anonKey) {
     return null;
   }
@@ -82,7 +52,9 @@ export function getSupabaseClient(): SupabaseClient | null {
   try {
     cachedClient = createClient(config.url, config.anonKey, {
       auth: {
-        persistSession: false,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
       },
       realtime: {
         params: {
@@ -90,11 +62,13 @@ export function getSupabaseClient(): SupabaseClient | null {
         },
       },
     });
+
     lastUsedUrl = config.url;
     lastUsedKey = config.anonKey;
+
     return cachedClient;
-  } catch (err) {
-    console.error("Error creating Supabase client:", err);
+  } catch (error) {
+    console.error("Error creating Supabase client:", error);
     return null;
   }
 }
@@ -104,10 +78,11 @@ export async function testSupabaseConnection(): Promise<{
   message: string;
 }> {
   const client = getSupabaseClient();
+
   if (!client) {
     return {
       success: false,
-      message: "لم يتم إدخال بيانات الربط (Project URL أو Anon Key)",
+      message: "لم يتم ضبط بيانات Supabase في ملف البيئة.",
     };
   }
 
@@ -121,10 +96,10 @@ export async function testSupabaseConnection(): Promise<{
       if (error.code === "42P01") {
         return {
           success: false,
-          message:
-            "تم الاتصال بـ Supabase، ولكن جدول service_requests غير موجود. يرجى تنفيذ كود SQL في SQL Editor.",
+          message: "جدول service_requests غير موجود.",
         };
       }
+
       return {
         success: false,
         message: `خطأ في الاتصال: ${error.message}`,
@@ -133,25 +108,41 @@ export async function testSupabaseConnection(): Promise<{
 
     return {
       success: true,
-      message: "تم الاتصال بقاعدة بيانات Supabase بنجاح تام! 🟢",
+      message: "تم الاتصال بقاعدة بيانات Supabase بنجاح.",
     };
-  } catch (err: unknown) {
+  } catch (error: unknown) {
     return {
       success: false,
-      message: `فشل الاتصال: ${err instanceof Error ? err.message : String(err)}`,
+      message:
+        error instanceof Error
+          ? error.message
+          : "فشل الاتصال بـ Supabase.",
     };
   }
 }
 
-// Broadcast event across tabs/windows on the same browser
-function broadcastEvent(action: "new" | "update" | "delete", request?: ServiceRequest) {
-  if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+function broadcastEvent(
+  action: "new" | "update" | "delete",
+  request?: ServiceRequest
+) {
+  if (
+    typeof window !== "undefined" &&
+    "BroadcastChannel" in window
+  ) {
     try {
-      const bc = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
-      bc.postMessage({ action, request, timestamp: Date.now() });
+      const channel = new BroadcastChannel(
+        BROADCAST_CHANNEL_NAME
+      );
+
+      channel.postMessage({
+        action,
+        request,
+        timestamp: Date.now(),
+      });
+
       setTimeout(() => {
         try {
-          bc.close();
+          channel.close();
         } catch {
           // ignore
         }
@@ -162,54 +153,84 @@ function broadcastEvent(action: "new" | "update" | "delete", request?: ServiceRe
   }
 }
 
-// Audio notification chime using Web Audio API
 export function playNotificationChime(): void {
   if (typeof window === "undefined") return;
+
   try {
     const AudioContextClass =
       window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      (
+        window as unknown as {
+          webkitAudioContext: typeof AudioContext;
+        }
+      ).webkitAudioContext;
+
     if (!AudioContextClass) return;
 
-    const ctx = new AudioContextClass();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    const context = new AudioContextClass();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
 
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-    osc.frequency.setValueAtTime(880.0, ctx.currentTime + 0.12); // A5
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(
+      587.33,
+      context.currentTime
+    );
+    oscillator.frequency.setValueAtTime(
+      880,
+      context.currentTime + 0.12
+    );
 
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+    gain.gain.setValueAtTime(
+      0.2,
+      context.currentTime
+    );
+    gain.gain.exponentialRampToValueAtTime(
+      0.001,
+      context.currentTime + 0.45
+    );
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
 
-    osc.start();
-    osc.stop(ctx.currentTime + 0.45);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.45);
   } catch {
-    // Audio autoplay restrictions or not supported
+    // ignore
   }
 }
 
-// Get local requests safely
 export function getLocalRequests(): ServiceRequest[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") {
+    return [];
+  }
+
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_REQUESTS);
+    const raw = localStorage.getItem(
+      STORAGE_KEY_REQUESTS
+    );
+
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-export function saveLocalRequests(requests: ServiceRequest[]): void {
+export function saveLocalRequests(
+  requests: ServiceRequest[]
+): void {
   if (typeof window !== "undefined") {
-    localStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify(requests));
+    localStorage.setItem(
+      STORAGE_KEY_REQUESTS,
+      JSON.stringify(requests)
+    );
   }
 }
 
-// Fetch all requests: queries Supabase and updates local cache
+/**
+ * المدير فقط يستخدم هذه الدالة لجلب جميع الطلبات.
+ * حماية القراءة الفعلية موجودة في RLS داخل Supabase.
+ */
 export async function getAllRequests(): Promise<{
   requests: ServiceRequest[];
   isRemote: boolean;
@@ -219,223 +240,379 @@ export async function getAllRequests(): Promise<{
 
   if (!client) {
     return {
-      requests: getLocalRequests(),
+      requests: [],
       isRemote: false,
+      error: "تعذر الاتصال بـ Supabase.",
     };
   }
 
   try {
     const { data, error } = await client
       .from("service_requests")
-      .select("*")
-      .order("created_at", { ascending: false });
+      .select(
+        "id, customer_id, customer_name, whatsapp, service, details, status, admin_notes, final_file_url, tracking_token, created_at, updated_at"
+      )
+      .order("created_at", {
+        ascending: false,
+      });
 
     if (error) {
-      console.warn("Supabase fetch failed, falling back to local:", error.message);
+      console.error(
+        "Supabase fetch failed:",
+        error.message
+      );
+
       return {
-        requests: getLocalRequests(),
+        requests: [],
         isRemote: false,
         error: error.message,
       };
     }
 
-    const remoteRequests: ServiceRequest[] = (data || []).map((row) => ({
-      id: String(row.id),
-      name: row.customer_name || "بدون اسم",
-      whatsapp: row.whatsapp || "",
-      service: row.service || "طلب مخصص",
-      details: row.details || "",
-      status: row.status || "جديد",
-      date: row.created_at || new Date().toISOString(),
-      admin_notes: row.admin_notes || "",
-      final_file_url: row.final_file_url || "",
-      source: "supabase",
-    }));
-
-    saveLocalRequests(remoteRequests);
+    const requests: ServiceRequest[] =
+      (data || []).map((row) => ({
+        id: String(row.id),
+        customer_id: row.customer_id
+          ? String(row.customer_id)
+          : null,
+        name: row.customer_name || "بدون اسم",
+        whatsapp: row.whatsapp || "",
+        service: row.service || "طلب مخصص",
+        details: row.details || "",
+        status: row.status || "جديد",
+        date:
+          row.created_at ||
+          new Date().toISOString(),
+        admin_notes: row.admin_notes || "",
+        final_file_url:
+          row.final_file_url || "",
+        tracking_token:
+          row.tracking_token || "",
+        source: "supabase",
+      }));
 
     return {
-      requests: remoteRequests,
+      requests,
       isRemote: true,
     };
-  } catch (err: unknown) {
-    console.error("Fetch requests error:", err);
+  } catch (error: unknown) {
     return {
-      requests: getLocalRequests(),
+      requests: [],
       isRemote: false,
-      error: err instanceof Error ? err.message : "خطأ غير معروف",
+      error:
+        error instanceof Error
+          ? error.message
+          : "خطأ غير معروف.",
     };
   }
 }
 
-// Create new service request
+/**
+ * جلب طلب واحد بواسطة رمز المتابعة السري.
+ *
+ * هذه الدالة تستخدم RPC في Supabase،
+ * ولا تسمح للعميل بقراءة جدول الطلبات مباشرة.
+ */
+export async function getRequestByTrackingToken(
+  trackingToken: string
+): Promise<{
+  request: ServiceRequest | null;
+  error?: string;
+}> {
+  const client = getSupabaseClient();
+
+  if (!client) {
+    return {
+      request: null,
+      error: "تعذر الاتصال بـ Supabase.",
+    };
+  }
+
+  const token = trackingToken.trim();
+
+  if (!token) {
+    return {
+      request: null,
+      error: "رمز المتابعة غير موجود.",
+    };
+  }
+
+  try {
+    const { data, error } =
+      await client.rpc(
+        "get_request_by_tracking_token",
+        {
+          p_tracking_token: token,
+        }
+      );
+
+    if (error) {
+      console.error(
+        "Tracking request failed:",
+        error.message
+      );
+
+      return {
+        request: null,
+        error: error.message,
+      };
+    }
+
+    const row = Array.isArray(data)
+      ? data[0]
+      : data;
+
+    if (!row) {
+      return {
+        request: null,
+        error:
+          "لم يتم العثور على طلب بهذا الرمز.",
+      };
+    }
+
+    const request: ServiceRequest = {
+      id: String(row.id),
+      customer_id: row.customer_id
+        ? String(row.customer_id)
+        : null,
+      name: row.customer_name || "",
+      whatsapp: row.whatsapp || "",
+      service: row.service || "",
+      details: row.details || "",
+      status: row.status || "جديد",
+      date:
+        row.created_at ||
+        new Date().toISOString(),
+      admin_notes: row.admin_notes || "",
+      final_file_url:
+        row.final_file_url || "",
+      source: "supabase",
+    };
+
+    return {
+      request,
+    };
+  } catch (error: unknown) {
+    return {
+      request: null,
+      error:
+        error instanceof Error
+          ? error.message
+          : "حدث خطأ أثناء متابعة الطلب.",
+    };
+  }
+}
+
+/**
+ * إنشاء رمز متابعة عشوائي قوي.
+ */
+function generateTrackingToken(): string {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return `${crypto.randomUUID()}-${crypto.randomUUID()}`;
+  }
+
+  return `${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+}
+
+/**
+ * إنشاء طلب جديد.
+ */
 export async function createServiceRequest(params: {
   id?: string;
   name: string;
   whatsapp: string;
   service: string;
   details: string;
-}): Promise<{ success: boolean; request: ServiceRequest; error?: string }> {
+}): Promise<{
+  success: boolean;
+  request: ServiceRequest;
+  error?: string;
+}> {
   const client = getSupabaseClient();
-  const requestId = params.id || `REQ-${Date.now().toString().slice(-8)}`;
-  const now = new Date().toISOString();
 
-  const newRequest: ServiceRequest = {
-    id: requestId,
-    name: params.name.trim(),
-    whatsapp: params.whatsapp.trim(),
-    service: params.service,
-    details: params.details.trim(),
-    status: "جديد",
-    date: now,
-    admin_notes: "",
-  };
-
-  // Always save locally first for resilience
-  const currentLocal = getLocalRequests();
-  saveLocalRequests([newRequest, ...currentLocal]);
-
-  // Broadcast instantly to any open admin tabs on same device/browser
-  broadcastEvent("new", newRequest);
-
-  if (client) {
-    try {
-      const { data, error } = await client
-        .from("service_requests")
-        .insert([
-          {
-            customer_name: newRequest.name,
-            whatsapp: newRequest.whatsapp,
-            service: newRequest.service,
-            details: newRequest.details,
-            status: newRequest.status,
-          },
-        ])
-        .select()
-        .single();
-
-      if (error) {
-        console.warn("Supabase insert error:", error);
-        return {
-          success: true,
-          request: newRequest,
-          error: `حُفظ محلياً فقط (${error.message})`,
-        };
-      }
-
-      if (data?.id) {
-        newRequest.id = String(data.id);
-        newRequest.source = "supabase";
-        const updated = [newRequest, ...currentLocal];
-        saveLocalRequests(updated);
-        broadcastEvent("new", newRequest);
-      }
-    } catch (err: unknown) {
-      console.error("Supabase insert failed:", err);
-    }
+  if (!client) {
+    throw new Error(
+      "تعذر الاتصال بـ Supabase. تأكد من إعداد متغيرات البيئة."
+    );
   }
 
-  return { success: true, request: newRequest };
+  const trackingToken =
+    generateTrackingToken();
+
+  const { data, error } = await client
+    .from("service_requests")
+    .insert({
+      customer_name: params.name.trim(),
+      whatsapp: params.whatsapp.trim(),
+      service: params.service.trim(),
+      details: params.details.trim(),
+      status: "جديد",
+      admin_notes: "",
+      tracking_token: trackingToken,
+    })
+    .select(
+      "id, customer_id, customer_name, whatsapp, service, details, status, admin_notes, final_file_url, tracking_token, created_at, updated_at"
+    )
+    .single();
+
+  if (error || !data) {
+    throw new Error(
+      error?.message ||
+        "تعذر حفظ الطلب."
+    );
+  }
+
+  const request: ServiceRequest = {
+    id: String(data.id),
+    customer_id: data.customer_id
+      ? String(data.customer_id)
+      : null,
+    name: data.customer_name,
+    whatsapp: data.whatsapp,
+    service: data.service,
+    details: data.details,
+    status: data.status,
+    date:
+      data.created_at ||
+      new Date().toISOString(),
+    admin_notes:
+      data.admin_notes || "",
+    final_file_url:
+      data.final_file_url || "",
+    tracking_token:
+      data.tracking_token ||
+      trackingToken,
+    source: "supabase",
+  };
+
+  broadcastEvent("new", request);
+
+  return {
+    success: true,
+    request,
+  };
 }
 
-// Update request status & admin notes
 export async function updateRequestStatusAndNotes(
   id: string,
   status: string,
   adminNotes?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+}> {
   const client = getSupabaseClient();
 
-  const currentLocal = getLocalRequests();
-  let updatedItem: ServiceRequest | undefined;
-  const updatedLocal = currentLocal.map((r) => {
-    if (r.id === id) {
-      updatedItem = {
-        ...r,
-        status,
-        admin_notes: adminNotes !== undefined ? adminNotes : r.admin_notes,
-      };
-      return updatedItem;
-    }
-    return r;
-  });
-  saveLocalRequests(updatedLocal);
-
-  if (updatedItem) {
-    broadcastEvent("update", updatedItem);
+  if (!client) {
+    return {
+      success: false,
+      error: "تعذر الاتصال بـ Supabase.",
+    };
   }
 
-  if (client) {
-    try {
-      const updatePayload: Record<string, unknown> = {
-        status,
-        updated_at: new Date().toISOString(),
-      };
-      if (adminNotes !== undefined) {
-        updatePayload.admin_notes = adminNotes;
-      }
+  try {
+    const updatePayload: Record<
+      string,
+      unknown
+    > = {
+      status,
+      updated_at:
+        new Date().toISOString(),
+    };
 
-      const { error } = await client
-        .from("service_requests")
-        .update(updatePayload)
-        .eq("id", id);
+    if (adminNotes !== undefined) {
+      updatePayload.admin_notes =
+        adminNotes;
+    }
 
-      if (error) {
-        return { success: false, error: error.message };
-      }
-    } catch (err: unknown) {
+    const { error } = await client
+      .from("service_requests")
+      .update(updatePayload)
+      .eq("id", id);
+
+    if (error) {
       return {
         success: false,
-        error: err instanceof Error ? err.message : "خطأ في التحديث",
+        error: error.message,
       };
     }
-  }
 
-  return { success: true };
+    return {
+      success: true,
+    };
+  } catch (error: unknown) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "خطأ في تحديث الطلب.",
+    };
+  }
 }
 
-// Delete request
 export async function deleteServiceRequest(
   id: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+}> {
   const client = getSupabaseClient();
 
-  const currentLocal = getLocalRequests();
-  const updatedLocal = currentLocal.filter((r) => r.id !== id);
-  saveLocalRequests(updatedLocal);
-  broadcastEvent("delete");
-
-  if (client) {
-    try {
-      const { error } = await client
-        .from("service_requests")
-        .delete()
-        .eq("id", id);
-
-      if (error) {
-        return { success: false, error: error.message };
-      }
-    } catch (err: unknown) {
-      return {
-        success: false,
-        error: err instanceof Error ? err.message : "خطأ أثناء الحذف",
-      };
-    }
+  if (!client) {
+    return {
+      success: false,
+      error: "تعذر الاتصال بـ Supabase.",
+    };
   }
 
-  return { success: true };
+  try {
+    const { error } = await client
+      .from("service_requests")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+
+    broadcastEvent("delete");
+
+    return {
+      success: true,
+    };
+  } catch (error: unknown) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "خطأ أثناء حذف الطلب.",
+    };
+  }
 }
 
-// Subscribe to real-time events (Supabase WebSockets + BroadcastChannel + Storage Event)
 export function subscribeToRealtimeRequests(callbacks: {
-  onNew: (req: ServiceRequest) => void;
-  onUpdate: (req: ServiceRequest) => void;
+  onNew: (request: ServiceRequest) => void;
+  onUpdate: (request: ServiceRequest) => void;
   onDelete: () => void;
 }): () => void {
   const client = getSupabaseClient();
-  let supabaseChannel: ReturnType<SupabaseClient["channel"]> | null = null;
 
-  // 1. Supabase Realtime WebSocket Listener (Syncs across completely different devices & networks)
+  let supabaseChannel:
+    | ReturnType<SupabaseClient["channel"]>
+    | null = null;
+
   if (client) {
     try {
       supabaseChannel = client
@@ -448,20 +625,50 @@ export function subscribeToRealtimeRequests(callbacks: {
             table: "service_requests",
           },
           (payload) => {
-            const row = payload.new as Record<string, unknown>;
-            const newReq: ServiceRequest = {
+            const row =
+              payload.new as Record<
+                string,
+                unknown
+              >;
+
+            callbacks.onNew({
               id: String(row.id),
-              name: String(row.customer_name || "عميل جديد"),
-              whatsapp: String(row.whatsapp || ""),
-              service: String(row.service || "طلب مخصص"),
-              details: String(row.details || ""),
-              status: String(row.status || "جديد"),
-              date: String(row.created_at || new Date().toISOString()),
-              admin_notes: String(row.admin_notes || ""),
-              final_file_url: String(row.final_file_url || ""),
+              customer_id:
+                row.customer_id
+                  ? String(row.customer_id)
+                  : null,
+              name: String(
+                row.customer_name ||
+                  "عميل جديد"
+              ),
+              whatsapp: String(
+                row.whatsapp || ""
+              ),
+              service: String(
+                row.service ||
+                  "طلب مخصص"
+              ),
+              details: String(
+                row.details || ""
+              ),
+              status: String(
+                row.status || "جديد"
+              ),
+              date: String(
+                row.created_at ||
+                  new Date().toISOString()
+              ),
+              admin_notes: String(
+                row.admin_notes || ""
+              ),
+              final_file_url: String(
+                row.final_file_url || ""
+              ),
+              tracking_token: String(
+                row.tracking_token || ""
+              ),
               source: "supabase",
-            };
-            callbacks.onNew(newReq);
+            });
           }
         )
         .on(
@@ -472,20 +679,48 @@ export function subscribeToRealtimeRequests(callbacks: {
             table: "service_requests",
           },
           (payload) => {
-            const row = payload.new as Record<string, unknown>;
-            const updatedReq: ServiceRequest = {
+            const row =
+              payload.new as Record<
+                string,
+                unknown
+              >;
+
+            callbacks.onUpdate({
               id: String(row.id),
-              name: String(row.customer_name || ""),
-              whatsapp: String(row.whatsapp || ""),
-              service: String(row.service || ""),
-              details: String(row.details || ""),
-              status: String(row.status || ""),
-              date: String(row.created_at || new Date().toISOString()),
-              admin_notes: String(row.admin_notes || ""),
-              final_file_url: String(row.final_file_url || ""),
+              customer_id:
+                row.customer_id
+                  ? String(row.customer_id)
+                  : null,
+              name: String(
+                row.customer_name || ""
+              ),
+              whatsapp: String(
+                row.whatsapp || ""
+              ),
+              service: String(
+                row.service || ""
+              ),
+              details: String(
+                row.details || ""
+              ),
+              status: String(
+                row.status || ""
+              ),
+              date: String(
+                row.created_at ||
+                  new Date().toISOString()
+              ),
+              admin_notes: String(
+                row.admin_notes || ""
+              ),
+              final_file_url: String(
+                row.final_file_url || ""
+              ),
+              tracking_token: String(
+                row.tracking_token || ""
+              ),
               source: "supabase",
-            };
-            callbacks.onUpdate(updatedReq);
+            });
           }
         )
         .on(
@@ -499,29 +734,51 @@ export function subscribeToRealtimeRequests(callbacks: {
             callbacks.onDelete();
           }
         )
-        .subscribe((status) => {
-          if (status === "SUBSCRIBED") {
-            console.log("Supabase Realtime connected successfully");
-          }
-        });
-    } catch (err) {
-      console.warn("Could not set up Supabase realtime channel:", err);
+        .subscribe();
+    } catch (error) {
+      console.warn(
+        "Could not set up Supabase realtime:",
+        error
+      );
     }
   }
 
-  // 2. BroadcastChannel Listener (Syncs across tabs immediately on same browser)
-  let bc: BroadcastChannel | null = null;
-  if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+  let broadcastChannel:
+    | BroadcastChannel
+    | null = null;
+
+  if (
+    typeof window !== "undefined" &&
+    "BroadcastChannel" in window
+  ) {
     try {
-      bc = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
-      bc.onmessage = (ev) => {
-        const data = ev.data;
+      broadcastChannel =
+        new BroadcastChannel(
+          BROADCAST_CHANNEL_NAME
+        );
+
+      broadcastChannel.onmessage = (
+        event
+      ) => {
+        const data = event.data;
+
         if (!data) return;
-        if (data.action === "new" && data.request) {
+
+        if (
+          data.action === "new" &&
+          data.request
+        ) {
           callbacks.onNew(data.request);
-        } else if (data.action === "update" && data.request) {
-          callbacks.onUpdate(data.request);
-        } else if (data.action === "delete") {
+        } else if (
+          data.action === "update" &&
+          data.request
+        ) {
+          callbacks.onUpdate(
+            data.request
+          );
+        } else if (
+          data.action === "delete"
+        ) {
           callbacks.onDelete();
         }
       };
@@ -530,30 +787,27 @@ export function subscribeToRealtimeRequests(callbacks: {
     }
   }
 
-  // 3. Storage Event Listener (Additional cross-tab safety)
-  const handleStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY_REQUESTS) {
-      callbacks.onDelete(); // triggers data reload
-    }
-  };
-  if (typeof window !== "undefined") {
-    window.addEventListener("storage", handleStorage);
-  }
-
-  // Cleanup function
   return () => {
     if (supabaseChannel && client) {
-      client.removeChannel(supabaseChannel);
+      client.removeChannel(
+        supabaseChannel
+      );
     }
-    if (bc) {
+
+    if (broadcastChannel) {
       try {
-        bc.close();
+        broadcastChannel.close();
       } catch {
         // ignore
       }
     }
-    if (typeof window !== "undefined") {
-      window.removeEventListener("storage", handleStorage);
-    }
   };
+}
+
+export function saveSupabaseConfig(
+  url: string,
+  key: string
+): void {
+  void url;
+  void key;
 }

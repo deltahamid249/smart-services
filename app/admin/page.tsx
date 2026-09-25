@@ -47,28 +47,18 @@ import {
   isCurrentAdminAuthenticated,
   logoutAdminUser,
   verifyAdminLogin,
-  updateAdminCredentials,
   getAdminSession,
 } from "@/lib/auth";
+import { getSupabaseClient } from "@/lib/supabase";
 
 export default function AdminPage() {
-  // Authentication State with Lazy Initializers
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("logout") === "1" || params.get("lock") === "1") {
-      logoutAdminUser();
-      return false;
-    }
-    return isCurrentAdminAuthenticated();
-  });
+  // Authentication State - Supabase Auth
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [, setAuthChecking] = useState(true);
   const [loginUser, setLoginUser] = useState("");
   const [loginPass, setLoginPass] = useState("");
   const [loginError, setLoginError] = useState("");
-  const [adminName, setAdminName] = useState<string>(() => {
-    if (typeof window === "undefined") return "المسؤول";
-    return getAdminSession()?.username || "المسؤول";
-  });
+  const [adminName, setAdminName] = useState("المسؤول");
 
   // Requests Data State
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
@@ -167,6 +157,50 @@ export default function AdminPage() {
     }
   }, [soundEnabled, showToast]);
 
+  // Validate the Supabase Auth session before loading the dashboard
+  useEffect(() => {
+    let active = true;
+
+    const checkAdminSession = async () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+
+        if (params.get("logout") === "1" || params.get("lock") === "1") {
+          await logoutAdminUser();
+          if (active) {
+            setIsAuthenticated(false);
+            setAdminName("المسؤول");
+          }
+          return;
+        }
+
+        const authenticated = await isCurrentAdminAuthenticated();
+
+        if (!active) return;
+
+        setIsAuthenticated(authenticated);
+
+        if (authenticated) {
+          const session = getAdminSession();
+          setAdminName(session?.username || "المسؤول");
+        }
+      } catch {
+        if (active) {
+          setIsAuthenticated(false);
+          setAdminName("المسؤول");
+        }
+      } finally {
+        if (active) setAuthChecking(false);
+      }
+    };
+
+    checkAdminSession();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Initial Load
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -233,24 +267,31 @@ export default function AdminPage() {
   }, []);
 
   // Handle Admin Login
-  const handleInlineLogin = (e: React.FormEvent) => {
+  const handleInlineLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError("");
 
-    const res = verifyAdminLogin(loginUser, loginPass);
+    const res = await verifyAdminLogin(loginUser, loginPass);
+
     if (res.success) {
       setIsAuthenticated(true);
       const session = getAdminSession();
-      if (session?.username) setAdminName(session.username);
+
+      if (session?.username) {
+        setAdminName(session.username);
+      }
+
+      setLoginPass("");
       showToast("مرحباً بك! تم تسجيل الدخول بنجاح", "success");
     } else {
-      setLoginError(res.error || "اسم المستخدم أو كلمة المرور غير صحيحة");
+      setLoginError(res.error || "البريد الإلكتروني أو كلمة المرور غير صحيحة");
     }
   };
 
-  const handleLogout = () => {
-    logoutAdminUser();
+  const handleLogout = async () => {
+    await logoutAdminUser();
     setIsAuthenticated(false);
+    setAdminName("المسؤول");
     showToast("تم تسجيل الخروج", "info");
   };
 
@@ -368,25 +409,64 @@ export default function AdminPage() {
     }
   };
 
-  // Change Password
-  const handleChangePassword = (e: React.FormEvent) => {
+  // Change Admin Password through Supabase Auth
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPassError("");
+
+    if (newPass.length < 6) {
+      setPassError("كلمة المرور الجديدة يجب أن تكون 6 خانات على الأقل");
+      return;
+    }
 
     if (newPass !== confirmPass) {
       setPassError("كلمة المرور الجديدة غير متطابقة");
       return;
     }
 
-    const res = updateAdminCredentials(currentPass, newPass);
-    if (res.success) {
+    try {
+      const client = getSupabaseClient();
+
+      if (!client) {
+        setPassError("تعذر الاتصال بـ Supabase. تأكد من إعداد متغيرات البيئة.");
+        return;
+      }
+
+      const { data: userData, error: userError } = await client.auth.getUser();
+
+      if (userError || !userData.user?.email) {
+        setPassError("انتهت جلسة الإدارة. يرجى تسجيل الدخول مرة أخرى.");
+        await logoutAdminUser();
+        setIsAuthenticated(false);
+        return;
+      }
+
+      const { error: verifyError } = await client.auth.signInWithPassword({
+        email: userData.user.email,
+        password: currentPass,
+      });
+
+      if (verifyError) {
+        setPassError("كلمة المرور الحالية غير صحيحة.");
+        return;
+      }
+
+      const { error: updateError } = await client.auth.updateUser({
+        password: newPass,
+      });
+
+      if (updateError) {
+        setPassError(updateError.message || "تعذر تحديث كلمة المرور.");
+        return;
+      }
+
       showToast("تم تحديث كلمة المرور بنجاح!", "success");
       setCurrentPass("");
       setNewPass("");
       setConfirmPass("");
       setActiveModal("none");
-    } else {
-      setPassError(res.message);
+    } catch {
+      setPassError("حدث خطأ أثناء تحديث كلمة المرور. حاول مرة أخرى.");
     }
   };
 
@@ -543,14 +623,15 @@ alter publication supabase_realtime add table service_requests;`;
 
           <form onSubmit={handleInlineLogin}>
             <div className="field">
-              <label>اسم المستخدم</label>
+              <label>البريد الإلكتروني</label>
               <input
-                type="text"
+                type="email"
                 required
                 value={loginUser}
                 onChange={(e) => setLoginUser(e.target.value)}
-                placeholder="admin"
+                placeholder="admin@example.com"
                 autoComplete="username"
+                dir="ltr"
               />
             </div>
 
@@ -575,11 +656,11 @@ alter publication supabase_realtime add table service_requests;`;
                 fontSize: "12px",
                 color: "#64748b",
                 marginBottom: "18px",
+                lineHeight: "1.6",
               }}
             >
-              💡 <b>بيانات الدخول الافتراضية:</b>
-              <br />
-              المستخدم: <code>admin</code> | كلمة المرور: <code>Admin@Almnusaa2026!</code>
+              🔐 سجّل الدخول باستخدام البريد الإلكتروني وكلمة المرور
+              المرتبطين بحساب مسؤول النظام في Supabase.
             </div>
 
             <button

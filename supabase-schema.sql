@@ -1,79 +1,260 @@
--- كود إنشاء وتهيئة قاعدة بيانات منصة الحلول التقنية الذكية في Supabase
--- قم بنسخ هذا الكود ولصقه في Supabase > SQL Editor > Run
+-- =========================================================
+-- قاعدة بيانات منصة الحلول التقنية الذكية
+-- الإصدار الآمن
+-- =========================================================
 
-create table if not exists profiles (
-  id uuid primary key,
-  full_name text not null,
+CREATE TABLE IF NOT EXISTS profiles (
+  id uuid PRIMARY KEY,
+  full_name text NOT NULL,
   whatsapp text,
-  role text not null default 'customer',
-  created_at timestamptz default now()
+  role text NOT NULL DEFAULT 'customer',
+  created_at timestamptz DEFAULT now()
 );
 
-create table if not exists service_requests (
-  id uuid primary key default gen_random_uuid(),
+CREATE TABLE IF NOT EXISTS service_requests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id uuid,
-  customer_name text not null,
-  whatsapp text not null,
-  service text not null,
-  details text not null,
-  status text not null default 'جديد',
-  admin_notes text default '',
+  customer_name text NOT NULL,
+  whatsapp text NOT NULL,
+  service text NOT NULL,
+  details text NOT NULL,
+  status text NOT NULL DEFAULT 'جديد',
+  admin_notes text DEFAULT '',
   final_file_url text,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
+  tracking_token text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
--- إضافة عمود admin_notes إن لم يكن موجوداً
-alter table service_requests add column if not exists admin_notes text default '';
+-- الأعمدة المطلوبة في حال كان الجدول موجوداً مسبقاً
+ALTER TABLE service_requests
+ADD COLUMN IF NOT EXISTS customer_id uuid;
 
--- فهارس لتسريع البحث والاستعلام
-create index if not exists service_requests_status_idx on service_requests(status);
-create index if not exists service_requests_customer_idx on service_requests(customer_id);
-create index if not exists service_requests_created_idx on service_requests(created_at desc);
+ALTER TABLE service_requests
+ADD COLUMN IF NOT EXISTS admin_notes text DEFAULT '';
 
--- تفعيل سياسات الأمان على مستوى الصفوف (RLS)
-alter table service_requests enable row level security;
+ALTER TABLE service_requests
+ADD COLUMN IF NOT EXISTS final_file_url text;
 
--- حذف السياسات القديمة إن وجدت لتجنب التكرار
-drop policy if exists "Allow public to insert requests" on service_requests;
-drop policy if exists "Allow public read access" on service_requests;
-drop policy if exists "Allow public update requests" on service_requests;
-drop policy if exists "Allow public delete requests" on service_requests;
+ALTER TABLE service_requests
+ADD COLUMN IF NOT EXISTS tracking_token text;
 
--- السماح لجميع الزوار بإرسال طلباتهم
-create policy "Allow public to insert requests" 
-  on service_requests 
-  for insert 
-  with check (true);
+ALTER TABLE service_requests
+ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
--- السماح بقراءة الطلبات
-create policy "Allow public read access" 
-  on service_requests 
-  for select 
-  using (true);
 
--- السماح بتحديث الطلبات (الحالة والملاحظات)
-create policy "Allow public update requests" 
-  on service_requests 
-  for update 
-  using (true)
-  with check (true);
+-- =========================================================
+-- الفهارس
+-- =========================================================
 
--- السماح بحذف الطلبات من الإدارة
-create policy "Allow public delete requests" 
-  on service_requests 
-  for delete 
-  using (true);
+CREATE INDEX IF NOT EXISTS service_requests_status_idx
+ON service_requests(status);
 
--- تفعيل ميزة البث المباشر اللحظي (Supabase Realtime)
--- حتى يظهر أي طلب جديد فورياً في صفحة الإدارة لحظة إرساله
-do $$
-begin
-  if not exists (
-    select 1 from pg_publication_tables 
-    where pubname = 'supabase_realtime' 
-    and tablename = 'service_requests'
-  ) then
-    alter publication supabase_realtime add table service_requests;
-  end if;
-end $$;
+CREATE INDEX IF NOT EXISTS service_requests_customer_idx
+ON service_requests(customer_id);
+
+CREATE INDEX IF NOT EXISTS service_requests_created_idx
+ON service_requests(created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS service_requests_tracking_token_idx
+ON service_requests(tracking_token)
+WHERE tracking_token IS NOT NULL;
+
+
+-- =========================================================
+-- دالة التحقق من المدير
+-- =========================================================
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.profiles
+    WHERE id = auth.uid()
+      AND role = 'admin'
+  );
+$$;
+
+
+-- =========================================================
+-- تفعيل RLS
+-- =========================================================
+
+ALTER TABLE public.service_requests
+ENABLE ROW LEVEL SECURITY;
+
+
+-- =========================================================
+-- حذف السياسات القديمة
+-- =========================================================
+
+DROP POLICY IF EXISTS "Allow public to insert requests"
+ON public.service_requests;
+
+DROP POLICY IF EXISTS "Allow public read access"
+ON public.service_requests;
+
+DROP POLICY IF EXISTS "Allow public update requests"
+ON public.service_requests;
+
+DROP POLICY IF EXISTS "Allow public delete requests"
+ON public.service_requests;
+
+DROP POLICY IF EXISTS "Admins can read all requests"
+ON public.service_requests;
+
+DROP POLICY IF EXISTS "Admins can update all requests"
+ON public.service_requests;
+
+DROP POLICY IF EXISTS "Admins can delete all requests"
+ON public.service_requests;
+
+DROP POLICY IF EXISTS "Public can create requests"
+ON public.service_requests;
+
+
+-- =========================================================
+-- السماح بإنشاء طلب
+-- =========================================================
+
+CREATE POLICY "Public can create requests"
+ON public.service_requests
+FOR INSERT
+TO anon, authenticated
+WITH CHECK (
+  customer_id IS NULL
+  OR customer_id = auth.uid()
+);
+
+
+-- =========================================================
+-- المدير يستطيع رؤية جميع الطلبات
+-- =========================================================
+
+CREATE POLICY "Admins can read all requests"
+ON public.service_requests
+FOR SELECT
+TO authenticated
+USING (
+  public.is_admin()
+);
+
+
+-- =========================================================
+-- المدير يستطيع تعديل جميع الطلبات
+-- =========================================================
+
+CREATE POLICY "Admins can update all requests"
+ON public.service_requests
+FOR UPDATE
+TO authenticated
+USING (
+  public.is_admin()
+)
+WITH CHECK (
+  public.is_admin()
+);
+
+
+-- =========================================================
+-- المدير يستطيع حذف جميع الطلبات
+-- =========================================================
+
+CREATE POLICY "Admins can delete all requests"
+ON public.service_requests
+FOR DELETE
+TO authenticated
+USING (
+  public.is_admin()
+);
+
+
+-- =========================================================
+-- دالة متابعة الطلب بواسطة الرمز السري
+-- =========================================================
+
+CREATE OR REPLACE FUNCTION public.get_request_by_tracking_token(
+  p_tracking_token text
+)
+RETURNS TABLE (
+  id uuid,
+  customer_id uuid,
+  customer_name text,
+  whatsapp text,
+  service text,
+  details text,
+  status text,
+  admin_notes text,
+  final_file_url text,
+  created_at timestamptz,
+  updated_at timestamptz
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    sr.id,
+    sr.customer_id,
+    sr.customer_name,
+    sr.whatsapp,
+    sr.service,
+    sr.details,
+    sr.status,
+    sr.admin_notes,
+    sr.final_file_url,
+    sr.created_at,
+    sr.updated_at
+  FROM public.service_requests sr
+  WHERE sr.tracking_token = p_tracking_token
+  LIMIT 1;
+$$;
+
+
+-- =========================================================
+-- السماح باستدعاء دالة المتابعة
+-- =========================================================
+
+GRANT EXECUTE
+ON FUNCTION public.get_request_by_tracking_token(text)
+TO anon, authenticated;
+
+
+-- =========================================================
+-- الصلاحيات الأساسية للجدول
+-- =========================================================
+
+REVOKE ALL
+ON public.service_requests
+FROM anon;
+
+GRANT INSERT
+ON public.service_requests
+TO anon;
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON public.service_requests
+TO authenticated;
+
+
+-- =========================================================
+-- تفعيل Realtime
+-- =========================================================
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'service_requests'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime
+    ADD TABLE public.service_requests;
+  END IF;
+END $$;

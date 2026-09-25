@@ -14,7 +14,8 @@ const services=[
 ];
 
 export default function Services(){return <>
-<header className="header"><div className="container nav"><Link href="/" className="logo">الحلول <span>التقنية الذكية</span></Link><nav className="navlinks"><Link href="/">الرئيسية</Link><Link href="/services" className="active">الخدمات</Link><Link href="/request">طلب خدمة</Link><Link href="/auth/login">تسجيل الدخول</Link></nav></div></header>
+<header className="header"><div className="container nav"><Link href="/" className="logo">الحلول <span>التقنية الذكية</span></Link><nav className="navlinks"><Link href="/">الرئيسية</Link><Link href="/services" className="active">الخدمات</Link><Link href="/request">طلب خدمة</Link></nav></div></header>
 <main className="page"><div className="container"><div className="page-title"><h1>خدماتنا التقنية</h1><p>اختر خدمة أو اكتب طلبك بحرية.</p></div><div className="grid">{services.map(s=><div className="card" key={s[1]}><div className="service-icon">{s[0]}</div><h3>{s[1]}</h3><p>{s[2]}</p><Link href="/request" className="card-link">طلب الخدمة ←</Link></div>)}</div></div></main>
-<footer className="footer"><div className="container footer-inner"><strong>الحلول التقنية الذكية</strong><span>© {new Date().getFullYear()}</span></div></footer>
+<footer className="footer"><div className="container footer-inner"><strong>الحلول التقنية الذكية</strong><span>© {new Date().getFullYear()}</span></div>
+</footer>
 </>}
