@@ -2,6 +2,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 export type ServiceRequest = {
   id: string;
+  legacy_id?: string | null;
   customer_id?: string | null;
   name: string;
   whatsapp: string;
@@ -25,8 +26,16 @@ export interface SupabaseConfig {
 
 export function getStoredSupabaseConfig(): SupabaseConfig {
   return {
-    url: (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim(),
-    anonKey: (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "").trim(),
+    url: (
+      process.env.NEXT_PUBLIC_SMART_SERVICES_SUPABASE_URL ||
+      process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      ""
+    ).trim(),
+    anonKey: (
+      process.env.NEXT_PUBLIC_SMART_SERVICES_SUPABASE_ANON_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      ""
+    ).trim(),
   };
 }
 
@@ -250,7 +259,7 @@ export async function getAllRequests(): Promise<{
     const { data, error } = await client
       .from("service_requests")
       .select(
-        "id, customer_id, customer_name, whatsapp, service, details, status, admin_notes, final_file_url, tracking_token, created_at, updated_at"
+        "id, legacy_id, customer_id, customer_name, whatsapp, service, details, status, admin_notes, final_file_url, tracking_token, created_at, updated_at"
       )
       .order("created_at", {
         ascending: false,
@@ -272,6 +281,9 @@ export async function getAllRequests(): Promise<{
     const requests: ServiceRequest[] =
       (data || []).map((row) => ({
         id: String(row.id),
+        legacy_id: row.legacy_id
+          ? String(row.legacy_id)
+          : null,
         customer_id: row.customer_id
           ? String(row.customer_id)
           : null,
@@ -446,23 +458,20 @@ export async function createServiceRequest(params: {
   const trackingToken =
     generateTrackingToken();
 
-  const { data, error } = await client
-    .from("service_requests")
-    .insert({
-      customer_name: params.name.trim(),
-      whatsapp: params.whatsapp.trim(),
-      service: params.service.trim(),
-      details: params.details.trim(),
-      status: "جديد",
-      admin_notes: "",
-      tracking_token: trackingToken,
-    })
-    .select(
-      "id, customer_id, customer_name, whatsapp, service, details, status, admin_notes, final_file_url, tracking_token, created_at, updated_at"
-    )
-    .single();
+  const { data, error } = await client.rpc(
+    "create_service_request",
+    {
+      p_customer_name: params.name.trim(),
+      p_whatsapp: params.whatsapp.trim(),
+      p_service: params.service.trim(),
+      p_details: params.details.trim(),
+      p_tracking_token: trackingToken,
+    }
+  );
 
-  if (error || !data) {
+  const row = Array.isArray(data) ? data[0] : data;
+
+  if (error || !row) {
     throw new Error(
       error?.message ||
         "تعذر حفظ الطلب."
@@ -470,24 +479,24 @@ export async function createServiceRequest(params: {
   }
 
   const request: ServiceRequest = {
-    id: String(data.id),
-    customer_id: data.customer_id
-      ? String(data.customer_id)
+    id: String(row.id),
+    customer_id: row.customer_id
+      ? String(row.customer_id)
       : null,
-    name: data.customer_name,
-    whatsapp: data.whatsapp,
-    service: data.service,
-    details: data.details,
-    status: data.status,
+    name: row.customer_name,
+    whatsapp: row.whatsapp,
+    service: row.service,
+    details: row.details,
+    status: row.status,
     date:
-      data.created_at ||
+      row.created_at ||
       new Date().toISOString(),
     admin_notes:
-      data.admin_notes || "",
+      row.admin_notes || "",
     final_file_url:
-      data.final_file_url || "",
+      row.final_file_url || "",
     tracking_token:
-      data.tracking_token ||
+      row.tracking_token ||
       trackingToken,
     source: "supabase",
   };

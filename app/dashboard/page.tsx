@@ -416,7 +416,7 @@ export default function Dashboard() {
                           "break-all",
                       }}
                     >
-                      {request.id}
+                      {request.legacy_id || request.id}
                     </strong>
                   </div>
 

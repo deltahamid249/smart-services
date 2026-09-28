@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "NODE_ENV=production next build",
-    "pages:build": "NODE_ENV=production next build",
-    "pages:deploy": "next build && wrangler pages deploy out",
+    "pages:build": "CLOUDFLARE_PAGES=true NODE_ENV=production next build",
+    "pages:deploy": "CLOUDFLARE_PAGES=true NODE_ENV=production next build && CLOUDFLARE_API_TOKEN=\"${CLOUDFLARE_PAGES_API_TOKEN:-$CLOUDFLARE_API_TOKEN}\" wrangler pages deploy out --project-name almnusaa-services --branch main",
     "start": "next start",
     "lint": "eslint"
   },

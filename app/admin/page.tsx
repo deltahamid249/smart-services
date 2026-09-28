@@ -19,7 +19,6 @@ import {
   AlertCircle,
   X,
   Copy,
-  Check,
   Settings,
   Layers,
   FileSpreadsheet,
@@ -100,7 +99,6 @@ export default function AdminPage() {
   });
   const [testingDb, setTestingDb] = useState(false);
   const [dbTestResult, setDbTestResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [copiedSql, setCopiedSql] = useState(false);
 
   // Change Password Form
   const [currentPass, setCurrentPass] = useState("");
@@ -473,14 +471,15 @@ export default function AdminPage() {
   // Open WhatsApp with custom message
   const openWhatsApp = (request: ServiceRequest, template: "update" | "greeting" | "delivery" = "update") => {
     const cleanPhone = request.whatsapp.replace(/\D/g, "");
+    const displayRequestId = request.legacy_id || request.id;
     let text = "";
 
     if (template === "greeting") {
-      text = `مرحبًا ${request.name}،\nمعك إدارة منصة الحلول التقنية الذكية.\nاستلمنا طلبك رقم: ${request.id}\nالخدمة: ${request.service}\nوسنبدأ في مراجعته والتنفيذ.`;
+      text = `مرحبًا ${request.name}،\nمعك إدارة منصة الحلول التقنية الذكية.\nاستلمنا طلبك رقم: ${displayRequestId}\nالخدمة: ${request.service}\nوسنبدأ في مراجعته والتنفيذ.`;
     } else if (template === "delivery") {
-      text = `مرحبًا ${request.name}،\nيسعدنا إبلاغك بأن طلبك رقم (${request.id}) الخاص بـ "${request.service}" جاهز ومكتمل الآن! 🚀\nالحلول التقنية الذكية.`;
+      text = `مرحبًا ${request.name}،\nيسعدنا إبلاغك بأن طلبك رقم (${displayRequestId}) الخاص بـ "${request.service}" جاهز ومكتمل الآن! 🚀\nالحلول التقنية الذكية.`;
     } else {
-      text = `مرحبًا ${request.name}،\nبخصوص طلبك رقم: ${request.id}\nالخدمة: ${request.service}\nالحالة الحالية: [ ${request.status} ]\n\nالحلول التقنية الذكية`;
+      text = `مرحبًا ${request.name}،\nبخصوص طلبك رقم: ${displayRequestId}\nالخدمة: ${request.service}\nالحالة الحالية: [ ${request.status} ]\n\nالحلول التقنية الذكية`;
     }
 
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`, "_blank");
@@ -539,33 +538,6 @@ export default function AdminPage() {
     ready: requests.filter((r) => r.status === "جاهز للتسليم").length,
     delivered: requests.filter((r) => r.status === "تم التسليم").length,
   };
-
-  const sqlCode = `-- كود إنشاء جدول طلبات الخدمات وتفعيل البث اللحظي في Supabase
-create table if not exists service_requests (
-  id uuid primary key default gen_random_uuid(),
-  customer_id uuid,
-  customer_name text not null,
-  whatsapp text not null,
-  service text not null,
-  details text not null,
-  status text not null default 'جديد',
-  admin_notes text default '',
-  final_file_url text,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
-
-alter table service_requests add column if not exists admin_notes text default '';
-create index if not exists service_requests_created_idx on service_requests(created_at desc);
-alter table service_requests enable row level security;
-
-create policy "Allow public to insert requests" on service_requests for insert with check (true);
-create policy "Allow public read access" on service_requests for select using (true);
-create policy "Allow public update requests" on service_requests for update using (true);
-create policy "Allow public delete requests" on service_requests for delete using (true);
-
--- تفعيل البث اللحظي الفوري لظهور الطلبات فور وصولها في لوحة الإدارة:
-alter publication supabase_realtime add table service_requests;`;
 
   // --- Authentication Barrier ---
   if (!isAuthenticated) {
@@ -1282,11 +1254,11 @@ alter publication supabase_realtime add table service_requests;`;
                                 fontWeight: 700,
                               }}
                             >
-                              {request.id}
+                              {request.legacy_id || request.id}
                             </span>
                             <button
                               onClick={() => {
-                                navigator.clipboard.writeText(request.id);
+                                navigator.clipboard.writeText(request.legacy_id || request.id);
                                 showToast("تم نسخ رقم الطلب", "info");
                               }}
                               style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer" }}
@@ -1529,10 +1501,10 @@ alter publication supabase_realtime add table service_requests;`;
                             {/* Request ID */}
                             <td className="request-id" style={{ fontFamily: "monospace", fontSize: "13px" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                <span>{request.id}</span>
+                                <span>{request.legacy_id || request.id}</span>
                                 <button
                                   onClick={() => {
-                                    navigator.clipboard.writeText(request.id);
+                                    navigator.clipboard.writeText(request.legacy_id || request.id);
                                     showToast("تم نسخ رقم الطلب", "info");
                                   }}
                                   style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer" }}
@@ -1963,48 +1935,14 @@ alter publication supabase_realtime add table service_requests;`;
               <br />
               في لوحة تحكم Cloudflare &gt; Workers & Pages &gt; مشروعك &gt; Settings &gt; Environment Variables، أضف:
               <br />
-              1. <code>NEXT_PUBLIC_SUPABASE_URL</code>
+              1. <code>NEXT_PUBLIC_SMART_SERVICES_SUPABASE_URL</code>
               <br />
-              2. <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>
+              2. <code>NEXT_PUBLIC_SMART_SERVICES_SUPABASE_ANON_KEY</code>
             </div>
 
-            {/* SQL Setup Instructions Box */}
             <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <span style={{ fontSize: "13px", fontWeight: 700, color: "#334155" }}>
-                  كود تهيئة الجداول والبث اللحظي في Supabase SQL Editor:
-                </span>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(sqlCode);
-                    setCopiedSql(true);
-                    setTimeout(() => setCopiedSql(false), 2500);
-                  }}
-                  className="btn btn-light"
-                  style={{ fontSize: "12px", padding: "4px 10px", display: "flex", alignItems: "center", gap: "4px" }}
-                >
-                  {copiedSql ? <Check size={14} color="#16a34a" /> : <Copy size={14} />}
-                  {copiedSql ? "تم النسخ!" : "نسخ كود SQL"}
-                </button>
-              </div>
-
-              <pre
-                style={{
-                  background: "#0f172a",
-                  color: "#cbd5e1",
-                  padding: "12px",
-                  borderRadius: "10px",
-                  fontSize: "12px",
-                  maxHeight: "150px",
-                  overflowY: "auto",
-                  direction: "ltr",
-                  textAlign: "left",
-                }}
-              >
-                {sqlCode}
-              </pre>
-              <small style={{ color: "#64748b", marginTop: "6px", display: "block" }}>
-                💡 افتح لوحة تحكم Supabase ثم SQL Editor ثم الصق الكود واضغط Run لتفعيل الجداول والبث اللحظي الفوري.
+              <small style={{ color: "#64748b", display: "block", lineHeight: "1.7" }}>
+                مخطط قاعدة البيانات وسياسات RLS محفوظة في ملف المشروع. لا تضف سياسات تسمح بالقراءة أو التعديل العام على الطلبات.
               </small>
             </div>
           </div>
