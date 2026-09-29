@@ -3,14 +3,33 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import {
-  CheckCircle2,
-  MessageCircle,
-  Send,
-  FileText,
-  Copy,
+  AlertCircle,
+  ArrowLeft,
   Check,
+  CheckCircle2,
+  ClipboardList,
+  Copy,
+  FileText,
+  MessageCircle,
+  Phone,
+  Send,
+  UserRound,
 } from "lucide-react";
 import { createServiceRequest } from "@/lib/supabase";
+
+type RequestStep = 1 | 2 | 3;
+
+const serviceOptions = [
+  "طلب مخصص",
+  "التصميم الجرافيكي",
+  "المواقع الإلكترونية",
+  "تطبيقات الهاتف",
+  "الملفات والمستندات",
+  "Excel وقواعد البيانات",
+  "البرمجة والحلول التقنية",
+  "الاستضافة والنشر",
+  "الخدمات الأكاديمية التقنية",
+];
 
 const toAsciiDigits = (value: string) =>
   value
@@ -21,95 +40,109 @@ const toAsciiDigits = (value: string) =>
       String(digit.charCodeAt(0) - 0x06f0)
     );
 
+const normalizeCountryCode = (value: string) =>
+  toAsciiDigits(value).replace(/\s+/g, "");
+
+const normalizeLocalNumber = (value: string) =>
+  toAsciiDigits(value).replace(/\D/g, "");
+
+const withoutTrunkZero = (value: string) => value.replace(/^0/, "");
+
 export default function RequestPage() {
+  const [activeStep, setActiveStep] = useState<RequestStep>(1);
+  const [nameConfirmed, setNameConfirmed] = useState(false);
+  const [contactConfirmed, setContactConfirmed] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [countryCode, setCountryCode] = useState("+249");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [serviceName, setServiceName] = useState("طلب مخصص");
+  const [details, setDetails] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
   const [copied, setCopied] = useState(false);
   const [requestId, setRequestId] = useState("");
   const [trackingToken, setTrackingToken] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [serviceName, setServiceName] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const normalizedCountryCode = normalizeCountryCode(countryCode);
+  const normalizedPhone = normalizeLocalNumber(phoneNumber);
+  const localPhone = withoutTrunkZero(normalizedPhone);
+  const validCountryCode = /^\+[1-9]\d{0,2}$/.test(
+    normalizedCountryCode
+  );
+  const validPhone =
+    validCountryCode &&
+    localPhone.length >= 6 &&
+    localPhone.length <= 14 &&
+    localPhone.length + normalizedCountryCode.slice(1).length <= 15;
+  const validName = customerName.trim().length >= 2;
+  const validDetails = details.trim().length >= 3;
+
+  const openStep = (step: RequestStep) => {
+    if (
+      step === 2 &&
+      !nameConfirmed
+    ) {
+      return;
+    }
+
+    if (
+      step === 3 &&
+      !contactConfirmed
+    ) {
+      return;
+    }
+
+    setErrorMessage("");
+    setActiveStep(step);
+  };
+
+  const confirmName = () => {
+    if (!validName) return;
+
+    setNameConfirmed(true);
+    setErrorMessage("");
+    setActiveStep(2);
+  };
+
+  const confirmContact = () => {
+    if (!validPhone) return;
+
+    setContactConfirmed(true);
+    setErrorMessage("");
+    setActiveStep(3);
+  };
 
   const handleSubmit = async (
     event: FormEvent<HTMLFormElement>
   ) => {
     event.preventDefault();
 
-    if (submitting) return;
-
-    const form = new FormData(event.currentTarget);
-
-    const name = String(
-      form.get("name") || ""
-    ).trim();
-
-    const countryCode = toAsciiDigits(
-      String(form.get("countryCode") || "").trim()
-    ).replace(/\s+/g, "");
-
-    const phoneNumber = toAsciiDigits(
-      String(form.get("whatsappNumber") || "").trim()
-    ).replace(/\D/g, "");
-
-    if (!/^\+[1-9]\d{0,2}$/.test(countryCode)) {
-      alert(
-        "أدخل مفتاح الدولة في الخانة المخصصة بصيغة دولية، مثل +249."
-      );
+    if (submitting || !validName || !validPhone || !validDetails) {
       return;
     }
 
-    if (phoneNumber.length < 6 || phoneNumber.length > 14) {
-      alert(
-        "أدخل رقم الهاتف بالأرقام فقط، دون مفتاح الدولة."
-      );
-      return;
-    }
-
-    const internationalDigits =
-      `${countryCode.slice(1)}${phoneNumber}`;
-
-    if (internationalDigits.length > 15) {
-      alert(
-        "رقم الهاتف طويل أكثر من اللازم. تحقق من مفتاح الدولة والرقم."
-      );
-      return;
-    }
-
-    const whatsapp = `+${internationalDigits}`;
-
-    const service = String(
-      form.get("service") || "طلب مخصص"
-    ).trim();
-
-    const details = String(
-      form.get("details") || ""
-    ).trim();
+    const internationalNumber = `+${normalizedCountryCode.slice(
+      1
+    )}${localPhone}`;
 
     setSubmitting(true);
-    setCustomerName(name);
-    setServiceName(service);
+    setErrorMessage("");
 
     try {
-      const result =
-        await createServiceRequest({
-          name,
-          whatsapp,
-          service,
-          details,
-        });
+      const result = await createServiceRequest({
+        name: customerName.trim(),
+        whatsapp: internationalNumber,
+        service: serviceName.trim() || "طلب مخصص",
+        details: details.trim(),
+      });
 
       setRequestId(result.request.id);
-      setTrackingToken(
-        result.request.tracking_token || ""
-      );
+      setTrackingToken(result.request.tracking_token || "");
       setSent(true);
     } catch (error) {
-      console.error(
-        "Submission failed:",
-        error
-      );
-
-      alert(
+      console.error("Submission failed:", error);
+      setErrorMessage(
         error instanceof Error
           ? error.message
           : "تعذر إرسال الطلب. حاول مرة أخرى."
@@ -123,17 +156,11 @@ export default function RequestPage() {
     if (!trackingToken) return;
 
     try {
-      await navigator.clipboard.writeText(
-        trackingToken
-      );
-
+      await navigator.clipboard.writeText(trackingToken);
       setCopied(true);
-
-      setTimeout(() => {
-        setCopied(false);
-      }, 2000);
+      window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      alert(
+      setErrorMessage(
         "تعذر نسخ رمز المتابعة. يمكنك تحديده ونسخه يدويًا."
       );
     }
@@ -150,9 +177,7 @@ export default function RequestPage() {
 أرجو المتابعة والتأكيد وشكراً.`;
 
     window.open(
-      `https://wa.me/?text=${encodeURIComponent(
-        message
-      )}`,
+      `https://wa.me/?text=${encodeURIComponent(message)}`,
       "_blank",
       "noopener,noreferrer"
     );
@@ -161,286 +186,98 @@ export default function RequestPage() {
   if (sent) {
     return (
       <div className="ss-home ss-request-page" dir="rtl">
-        <main className="form-page">
+        <header className="header">
+          <div className="container nav">
+            <Link href="/" className="logo">
+              الحلول <span>التقنية الذكية</span>
+            </Link>
+            <nav className="navlinks" aria-label="التنقل الرئيسي">
+              <Link href="/">الرئيسية</Link>
+              <Link href="/services">الخدمات</Link>
+              <Link href="/request" className="active">
+                طلب خدمة
+              </Link>
+            </nav>
+          </div>
+        </header>
+
+        <main className="request-page">
           <div className="container">
-            <div
-              className="form-wrap"
-              style={{
-                textAlign: "center",
-                maxWidth: "650px",
-              }}
-            >
-            <div
-              style={{
-                width: "64px",
-                height: "64px",
-                borderRadius: "50%",
-                background: "#dcfce7",
-                color: "#16a34a",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                margin: "0 auto 20px",
-              }}
-            >
-              <CheckCircle2 size={36} />
-            </div>
-
-            <h1
-              style={{
-                fontSize: "28px",
-                color: "#0f172a",
-                marginBottom: "8px",
-              }}
-            >
-              تم إرسال طلبك بنجاح!
-            </h1>
-
-            <p
-              className="form-sub"
-              style={{ marginBottom: "25px" }}
-            >
-              تم حفظ طلبك بنجاح. احتفظ برقم الطلب ورمز
-              المتابعة لمتابعة حالة طلبك لاحقًا.
-            </p>
-
-            <div
-              style={{
-                background: "#eff6ff",
-                border: "1px solid #bfdbfe",
-                borderRadius: "16px",
-                padding: "20px",
-                marginBottom: "20px",
-                textAlign: "right",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: "15px",
-                  borderBottom:
-                    "1px solid #dbeafe",
-                  paddingBottom: "12px",
-                  marginBottom: "12px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <span
-                  style={{
-                    color: "#64748b",
-                    fontSize: "14px",
-                  }}
-                >
-                  رقم الطلب:
-                </span>
-
-                <strong
-                  style={{
-                    fontSize: "18px",
-                    color: "#1e40af",
-                    fontFamily: "monospace",
-                    direction: "ltr",
-                  }}
-                >
-                  {requestId}
-                </strong>
+            <section className="request-success" aria-labelledby="success-title">
+              <div className="success-mark" aria-hidden="true">
+                <CheckCircle2 size={32} />
               </div>
+              <span className="request-kicker">تم استلام طلبك</span>
+              <h1 id="success-title">طلبك في الطريق الصحيح</h1>
+              <p className="request-lede">
+                حفظنا التفاصيل بنجاح. احتفظ بالبيانات التالية لمتابعة الطلب
+                والتواصل معنا بسهولة.
+              </p>
 
-              <div
-                style={{
-                  marginBottom: "15px",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent:
-                      "space-between",
-                    alignItems: "center",
-                    gap: "10px",
-                    marginBottom: "8px",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span
-                    style={{
-                      color: "#64748b",
-                      fontSize: "14px",
-                    }}
-                  >
-                    رمز المتابعة الخاص بك:
-                  </span>
-
-                  <button
-                    type="button"
-                    onClick={
-                      copyTrackingToken
-                    }
-                    className="btn btn-light"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      padding: "7px 12px",
-                      fontSize: "13px",
-                    }}
-                  >
-                    {copied ? (
-                      <Check size={15} />
-                    ) : (
-                      <Copy size={15} />
-                    )}
-
-                    {copied
-                      ? "تم النسخ"
-                      : "نسخ الرمز"}
-                  </button>
+              <div className="success-summary">
+                <div className="summary-line">
+                  <span>رقم الطلب</span>
+                  <strong dir="ltr">{requestId}</strong>
                 </div>
-
-                <div
-                  style={{
-                    background: "#ffffff",
-                    border:
-                      "1px solid #bfdbfe",
-                    borderRadius: "10px",
-                    padding: "12px",
-                    fontFamily: "monospace",
-                    fontSize: "12px",
-                    color: "#1e3a8a",
-                    wordBreak: "break-all",
-                    direction: "ltr",
-                    textAlign: "left",
-                  }}
-                >
-                  {trackingToken}
+                <div className="summary-token">
+                  <div className="summary-token-head">
+                    <span>رمز المتابعة الخاص بك</span>
+                    <button
+                      type="button"
+                      className="token-copy"
+                      onClick={copyTrackingToken}
+                      aria-label="نسخ رمز المتابعة"
+                    >
+                      {copied ? <Check size={15} /> : <Copy size={15} />}
+                      {copied ? "تم النسخ" : "نسخ الرمز"}
+                    </button>
+                  </div>
+                  <code dir="ltr">{trackingToken}</code>
+                  <small>
+                    احتفظ بالرمز ولا تشاركه مع الآخرين؛ ستحتاج إليه عند
+                    متابعة حالة طلبك.
+                  </small>
                 </div>
-
-                <p
-                  style={{
-                    color: "#64748b",
-                    fontSize: "12px",
-                    marginTop: "8px",
-                    lineHeight: "1.7",
-                  }}
-                >
-                  احتفظ بهذا الرمز ولا تشاركه مع الآخرين؛
-                  فهو يستخدم للوصول إلى تفاصيل طلبك.
-                </p>
+                <div className="summary-line">
+                  <span>الخدمة</span>
+                  <strong>{serviceName}</strong>
+                </div>
               </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent:
-                    "space-between",
-                  fontSize: "14px",
-                  marginBottom: "7px",
-                }}
-              >
-                <span
-                  style={{ color: "#64748b" }}
-                >
-                  العميل:
+              <div className="request-note">
+                <FileText size={18} aria-hidden="true" />
+                <span>
+                  إذا كانت لديك ملفات توضيحية، أرسلها بعد الإرسال عبر WhatsApp
+                  مع رقم الطلب.
                 </span>
-
-                <strong>
-                  {customerName}
-                </strong>
               </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent:
-                    "space-between",
-                  fontSize: "14px",
-                  gap: "10px",
-                }}
-              >
-                <span
-                  style={{ color: "#64748b" }}
+              <div className="success-actions">
+                <button
+                  type="button"
+                  className="request-button request-button-whatsapp"
+                  onClick={openWhatsAppConfirmation}
                 >
-                  الخدمة المطلوبة:
-                </span>
-
-                <strong
-                  style={{
-                    color: "#2563eb",
-                    textAlign: "left",
-                  }}
+                  <MessageCircle size={18} aria-hidden="true" />
+                  تأكيد عبر WhatsApp
+                </button>
+                <Link
+                  href={`/dashboard?token=${encodeURIComponent(
+                    trackingToken
+                  )}`}
+                  className="request-button request-button-primary"
                 >
-                  {serviceName}
-                </strong>
+                  <FileText size={18} aria-hidden="true" />
+                  متابعة الطلب
+                </Link>
+                <Link
+                  href="/"
+                  className="request-button request-button-secondary"
+                >
+                  العودة للرئيسية
+                </Link>
               </div>
-            </div>
-
-            <div
-              className="notice"
-              style={{
-                marginBottom: "20px",
-                textAlign: "right",
-              }}
-            >
-              احتفظ برقم الطلب ورمز المتابعة. ستحتاج إليهما
-              عند متابعة حالة الطلب.
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                gap: "12px",
-                justifyContent: "center",
-                flexWrap: "wrap",
-              }}
-            >
-              <button
-                type="button"
-                onClick={
-                  openWhatsAppConfirmation
-                }
-                className="btn"
-                style={{
-                  background: "#22c55e",
-                  color: "#fff",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <MessageCircle size={18} />
-                تأكيد عبر WhatsApp
-              </button>
-
-              <Link
-                href={`/dashboard?token=${encodeURIComponent(
-                  trackingToken
-                )}`}
-                className="btn btn-primary"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <FileText size={18} />
-                متابعة طلباتي
-              </Link>
-
-              <Link
-                href="/"
-                className="btn btn-light"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                الرئيسية
-              </Link>
-            </div>
-            </div>
+            </section>
           </div>
         </main>
       </div>
@@ -454,287 +291,293 @@ export default function RequestPage() {
           <Link href="/" className="logo">
             الحلول <span>التقنية الذكية</span>
           </Link>
-
-          <nav className="navlinks">
-            <Link href="/">
-              الرئيسية
-            </Link>
-
-            <Link href="/services">
-              الخدمات
-            </Link>
-
-            <Link
-              href="/request"
-              className="active"
-            >
+          <nav className="navlinks" aria-label="التنقل الرئيسي">
+            <Link href="/">الرئيسية</Link>
+            <Link href="/services">الخدمات</Link>
+            <Link href="/request" className="active">
               طلب خدمة
             </Link>
           </nav>
         </div>
       </header>
 
-      <main className="form-page">
+      <main className="request-page">
         <div className="container">
-          <div className="form-wrap">
-            <div
-              style={{
-                marginBottom: "20px",
-              }}
-            >
-              <span className="badge">
-                نموذج الطلب المباشر
-              </span>
+          <section className="request-intro">
+            <span className="request-kicker">نبدأ بخطوة واضحة</span>
+            <h1>اطلب خدمتك بدون تعقيد</h1>
+            <p className="request-lede">
+              ثلاث خطوات قصيرة تكفي. اكتب ما نحتاجه للتواصل والفهم، وسنتولى
+              الباقي.
+            </p>
+          </section>
 
-              <h1
-                style={{
-                  fontSize: "28px",
-                }}
-              >
-                طلب خدمة تقنية
-              </h1>
+          <div className="request-layout">
+            <aside className="request-aside" aria-label="معلومات الطلب">
+              <div className="aside-card">
+                <span className="aside-icon" aria-hidden="true">
+                  <ClipboardList size={20} />
+                </span>
+                <strong>طلب واحد، متابعة واضحة</strong>
+                <p>
+                  بعد الإرسال تحصل على رقم طلب ورمز خاص لمتابعة آخر المستجدات.
+                </p>
+              </div>
+              <div className="aside-card aside-card-soft">
+                <span className="aside-icon" aria-hidden="true">
+                  <Phone size={20} />
+                </span>
+                <strong>تواصل على الرقم الذي تختاره</strong>
+                <p>
+                  يبدأ النموذج بمفتاح السودان +249 ويمكنك تغييره إذا كنت خارج
+                  السودان.
+                </p>
+              </div>
+            </aside>
 
-              <p className="form-sub">
-                اتبع الخطوات، وسنراجع طلبك ونتواصل معك عبر WhatsApp.
-              </p>
-            </div>
-
-            <ol
-              className="request-steps"
-              aria-label="خطوات إرسال الطلب"
-            >
-              <li className="request-step-card">
-                <span className="request-step-number">١</span>
-                <div className="request-step-copy">
-                  <strong>أدخل بياناتك</strong>
-                  <span>اكتب اسمك ومعلومات التواصل.</span>
+            <section className="request-card" aria-labelledby="flow-title">
+              <div className="request-card-head">
+                <div>
+                  <span className="request-kicker">النموذج المباشر</span>
+                  <h2 id="flow-title">أخبرنا بما تحتاج</h2>
                 </div>
-              </li>
-              <li className="request-step-card">
-                <span className="request-step-number">٢</span>
-                <div className="request-step-copy">
-                  <strong>اختر الخدمة</strong>
-                  <span>حدد نوع الخدمة التي تحتاجها.</span>
-                </div>
-              </li>
-              <li className="request-step-card">
-                <span className="request-step-number">٣</span>
-                <div className="request-step-copy">
-                  <strong>اشرح المطلوب</strong>
-                  <span>اكتب التفاصيل والمواصفات بوضوح.</span>
-                </div>
-              </li>
-              <li className="request-step-card">
-                <span className="request-step-number">٤</span>
-                <div className="request-step-copy">
-                  <strong>أرفق الملفات وأرسل</strong>
-                  <span>المرفقات اختيارية؛ احتفظ برمز المتابعة.</span>
-                </div>
-              </li>
-            </ol>
-
-            <form onSubmit={handleSubmit}>
-              <div className="field">
-                <label htmlFor="request-name">
-                  الاسم الكامل
-                </label>
-
-                <input
-                  id="request-name"
-                  name="name"
-                  required
-                  placeholder="مثال: محمد أحمد"
-                />
+                <span className="request-count">٣ خطوات</span>
               </div>
 
-              <div className="field">
-                <div className="phone-fields">
-                  <div>
-                    <label htmlFor="country-code">
-                      مفتاح الدولة *
-                    </label>
+              {errorMessage && (
+                <div className="request-error" role="alert">
+                  <AlertCircle size={18} aria-hidden="true" />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
 
-                    <input
-                      id="country-code"
-                      className="phone-input"
-                      name="countryCode"
-                      type="tel"
-                      inputMode="tel"
-                      autoComplete="tel-country-code"
-                      maxLength={4}
-                      pattern="[+][1-9١-٩۱-۹][0-9٠-٩۰-۹]{0,2}"
-                      title="أدخل مفتاح الدولة بصيغة دولية مثل +249"
-                      placeholder="+249"
-                      aria-describedby="country-code-hint"
-                      required
-                    />
-
-                    <span
-                      id="country-code-hint"
-                      className="phone-field-hint"
+              <form onSubmit={handleSubmit}>
+                <ol className="request-flow" aria-label="خطوات إرسال الطلب">
+                  <li className={activeStep === 1 ? "is-active" : ""}>
+                    <button
+                      type="button"
+                      className="flow-step-button"
+                      onClick={() => openStep(1)}
+                      aria-expanded={activeStep === 1}
+                      aria-controls="request-step-name"
                     >
-                      مثال: +249 للسودان
-                    </span>
-                  </div>
+                      <span className="flow-number">١</span>
+                      <span className="flow-copy">
+                        <strong>من نخاطب؟</strong>
+                        <small>
+                          {nameConfirmed
+                            ? customerName
+                            : "اكتب اسمك للبدء"}
+                        </small>
+                      </span>
+                      {nameConfirmed && (
+                        <Check className="flow-check" size={18} aria-label="مكتمل" />
+                      )}
+                      <ArrowLeft className="flow-arrow" size={18} aria-hidden="true" />
+                    </button>
 
-                  <div>
-                    <label htmlFor="whatsapp-number">
-                      رقم WhatsApp *
-                    </label>
+                    {activeStep === 1 && (
+                      <div className="flow-panel" id="request-step-name">
+                        <label htmlFor="request-name">الاسم الكامل</label>
+                        <div className="input-with-icon">
+                          <UserRound size={18} aria-hidden="true" />
+                          <input
+                            id="request-name"
+                            name="name"
+                            value={customerName}
+                            onChange={(event) => {
+                              setCustomerName(event.target.value);
+                              setNameConfirmed(false);
+                              setContactConfirmed(false);
+                            }}
+                            placeholder="مثال: محمد أحمد"
+                            autoComplete="name"
+                            autoFocus
+                            required
+                          />
+                        </div>
+                        <small className="field-hint">
+                          نستخدم الاسم فقط للتواصل بشأن طلبك.
+                        </small>
+                        {customerName.trim().length > 0 && (
+                          <button
+                            type="button"
+                            className="request-button request-button-primary panel-action"
+                            onClick={confirmName}
+                            disabled={!validName}
+                          >
+                            موافق
+                            <ArrowLeft size={17} aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </li>
 
-                    <input
-                      id="whatsapp-number"
-                      className="phone-input"
-                      name="whatsappNumber"
-                      type="tel"
-                      inputMode="numeric"
-                      autoComplete="tel-national"
-                      pattern="[0-9٠-٩۰-۹]{6,14}"
-                      title="أدخل أرقام الهاتف فقط دون مفتاح الدولة"
-                      placeholder="912345678"
-                      aria-describedby="phone-number-hint"
-                      required
-                    />
-
-                    <span
-                      id="phone-number-hint"
-                      className="phone-field-hint"
+                  <li className={activeStep === 2 ? "is-active" : ""}>
+                    <button
+                      type="button"
+                      className="flow-step-button"
+                      onClick={() => openStep(2)}
+                      disabled={!nameConfirmed}
+                      aria-expanded={activeStep === 2}
+                      aria-controls="request-step-contact"
                     >
-                      أدخل الرقم المحلي فقط، دون مفتاح الدولة
-                    </span>
-                  </div>
-                </div>
-              </div>
+                      <span className="flow-number">٢</span>
+                      <span className="flow-copy">
+                        <strong>كيف نتواصل معك؟</strong>
+                        <small>
+                          {contactConfirmed
+                            ? "تم حفظ رقم التواصل"
+                            : "رقم WhatsApp بالمفتاح الدولي"}
+                        </small>
+                      </span>
+                      {contactConfirmed && (
+                        <Check className="flow-check" size={18} aria-label="مكتمل" />
+                      )}
+                      <ArrowLeft className="flow-arrow" size={18} aria-hidden="true" />
+                    </button>
 
-              <div className="field">
-                <label htmlFor="request-service">
-                  الخدمة المطلوبة
-                </label>
+                    {activeStep === 2 && nameConfirmed && (
+                      <div className="flow-panel" id="request-step-contact">
+                        <div className="phone-fields">
+                          <div>
+                            <label htmlFor="country-code">مفتاح الدولة</label>
+                            <input
+                              id="country-code"
+                              name="countryCode"
+                              className="phone-input"
+                              type="tel"
+                              inputMode="tel"
+                              autoComplete="tel-country-code"
+                              value={countryCode}
+                              onChange={(event) => {
+                                setCountryCode(event.target.value);
+                                setContactConfirmed(false);
+                              }}
+                              maxLength={4}
+                              placeholder="+249"
+                              aria-describedby="country-code-hint"
+                              required
+                            />
+                            <small id="country-code-hint" className="field-hint">
+                              مثال: +249 للسودان
+                            </small>
+                          </div>
+                          <div>
+                            <label htmlFor="whatsapp-number">رقم WhatsApp</label>
+                            <input
+                              id="whatsapp-number"
+                              name="whatsappNumber"
+                              className="phone-input"
+                              type="tel"
+                              inputMode="numeric"
+                              autoComplete="tel-national"
+                              value={phoneNumber}
+                              onChange={(event) => {
+                                setPhoneNumber(event.target.value);
+                                setContactConfirmed(false);
+                              }}
+                              placeholder="912345678"
+                              aria-describedby="phone-number-hint"
+                              required
+                            />
+                            <small id="phone-number-hint" className="field-hint">
+                              الرقم المحلي فقط، ويمكن كتابته مع الصفر الأول
+                            </small>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="request-button request-button-primary panel-action"
+                          onClick={confirmContact}
+                          disabled={!validPhone}
+                        >
+                          موافق
+                          <ArrowLeft size={17} aria-hidden="true" />
+                        </button>
+                      </div>
+                    )}
+                  </li>
 
-                <select
-                  id="request-service"
-                  name="service"
-                  defaultValue="طلب مخصص"
-                >
-                  <option value="طلب مخصص">
-                    طلب مخصص (حدد احتياجك)
-                  </option>
+                  <li className={activeStep === 3 ? "is-active" : ""}>
+                    <button
+                      type="button"
+                      className="flow-step-button"
+                      onClick={() => openStep(3)}
+                      disabled={!contactConfirmed}
+                      aria-expanded={activeStep === 3}
+                      aria-controls="request-step-details"
+                    >
+                      <span className="flow-number">٣</span>
+                      <span className="flow-copy">
+                        <strong>ما الخدمة المطلوبة؟</strong>
+                        <small>
+                          {serviceName === "طلب مخصص"
+                            ? "اختر الخدمة واكتب التفاصيل"
+                            : serviceName}
+                        </small>
+                      </span>
+                      <ArrowLeft className="flow-arrow" size={18} aria-hidden="true" />
+                    </button>
 
-                  <option value="التصميم الجرافيكي">
-                    التصميم الجرافيكي
-                  </option>
-
-                  <option value="المواقع الإلكترونية">
-                    المواقع الإلكترونية
-                  </option>
-
-                  <option value="تطبيقات الهاتف">
-                    تطبيقات الهاتف
-                  </option>
-
-                  <option value="الملفات والمستندات">
-                    الملفات والمستندات (Word, PDF,
-                    PowerPoint)
-                  </option>
-
-                  <option value="Excel وقواعد البيانات">
-                    Excel وقواعد البيانات والتقارير
-                  </option>
-
-                  <option value="البرمجة والحلول التقنية">
-                    البرمجة والحلول التقنية
-                  </option>
-
-                  <option value="الاستضافة والنشر">
-                    الاستضافة والنشر وربط النطاقات
-                  </option>
-
-                  <option value="الخدمات الأكاديمية التقنية">
-                    الخدمات الأكاديمية والمشاريع التقنية
-                  </option>
-                </select>
-              </div>
-
-              <div className="field">
-                <label htmlFor="request-details">
-                  تفاصيل ومتطلبات الطلب
-                </label>
-
-                <textarea
-                  id="request-details"
-                  name="details"
-                  required
-                  placeholder="اشرح لنا بالتفصيل ماذا تريد أن ننجز لك، المواصفات المطلوبة، وأي ملاحظات إضافية..."
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="request-files">
-                  إرفاق ملفات توضيحية (اختياري)
-                </label>
-
-                <div
-                  style={{
-                    border:
-                      "2px dashed #cbd5e1",
-                    borderRadius: "12px",
-                    padding: "20px",
-                    textAlign: "center",
-                    background: "#f8fafc",
-                  }}
-                >
-                  <input
-                    id="request-files"
-                    type="file"
-                    multiple
-                    style={{
-                      border: "none",
-                      background:
-                        "transparent",
-                      cursor: "pointer",
-                    }}
-                  />
-
-                  <p
-                    style={{
-                      color: "#64748b",
-                      fontSize: "13px",
-                      marginTop: "8px",
-                    }}
-                  >
-                    يمكنك إرفاق ملفات PDF، صور،
-                    مستندات Word، ملفات مضغوطة.
-                  </p>
-                </div>
-              </div>
-
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={submitting}
-                style={{
-                  width: "100%",
-                  height: "50px",
-                  fontSize: "16px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent:
-                    "center",
-                  gap: "8px",
-                }}
-              >
-                {submitting ? (
-                  <span>
-                    جاري تسجيل الطلب وإرساله...
-                  </span>
-                ) : (
-                  <>
-                    <Send size={18} />
-                    إرسال الطلب الآن
-                  </>
-                )}
-              </button>
-            </form>
+                    {activeStep === 3 && contactConfirmed && (
+                      <div className="flow-panel" id="request-step-details">
+                        <div className="field-group">
+                          <label htmlFor="request-service">الخدمة المطلوبة</label>
+                          <select
+                            id="request-service"
+                            name="service"
+                            value={serviceName}
+                            onChange={(event) => setServiceName(event.target.value)}
+                          >
+                            {serviceOptions.map((service) => (
+                              <option key={service} value={service}>
+                                {service}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="field-group">
+                          <label htmlFor="request-details">تفاصيل ومتطلبات الطلب</label>
+                          <textarea
+                            id="request-details"
+                            name="details"
+                            value={details}
+                            onChange={(event) => setDetails(event.target.value)}
+                            placeholder="ما الذي تريد إنجازه؟ اذكر المواصفات أو الموعد أو أي ملاحظة مهمة."
+                            required
+                          />
+                        </div>
+                        <div className="file-note">
+                          <FileText size={17} aria-hidden="true" />
+                          <span>
+                            لا يتم رفع الملفات من هذا النموذج. إذا احتاج طلبك
+                            ملفات، أرسلها بعد الإرسال عبر WhatsApp.
+                          </span>
+                        </div>
+                        <button
+                          className="request-button request-button-submit panel-action"
+                          type="submit"
+                          disabled={submitting || !validDetails}
+                        >
+                          {submitting ? (
+                            <span className="loading-label" role="status">
+                              جاري إرسال الطلب...
+                            </span>
+                          ) : (
+                            <>
+                              <Send size={18} aria-hidden="true" />
+                              إرسال الطلب الآن
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                </ol>
+              </form>
+            </section>
           </div>
         </div>
       </main>

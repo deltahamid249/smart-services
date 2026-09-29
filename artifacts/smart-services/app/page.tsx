@@ -6,7 +6,6 @@ import {
   Braces,
   Check,
   ChevronLeft,
-  CircleHelp,
   ClipboardList,
   FileCheck2,
   FileText,
@@ -21,7 +20,6 @@ import {
   ShieldCheck,
   Smartphone,
   Sparkles,
-  WandSparkles,
   Workflow,
 } from "lucide-react";
 import ScrollReveal from "./ScrollReveal";
@@ -269,41 +267,6 @@ export default function Home() {
                   <p>{detail}</p>
                 </article>
               ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="ss-section">
-          <div className="ss-container ss-promise-grid">
-            <div className="ss-promise-copy">
-              <span className="ss-section-label">تجربة أهدأ وأوضح</span>
-              <h2>خلّ التفاصيل علينا، وركّز على فكرتك.</h2>
-              <p>
-                نؤمن أن الخدمة التقنية الجيدة تبدأ بفهم احتياجك، لا بإغراقك
-                بالمصطلحات. نرتب الخطوات معك ونعيد النتيجة بصيغة سهلة الاستخدام.
-              </p>
-            </div>
-            <div className="ss-promise-list">
-              <article className="ss-promise-item">
-                <CircleHelp size={19} />
-                <h3>لا تعرف من أين تبدأ؟</h3>
-                <p>صف المشكلة بلغتك، ونساعدك في تحديد المطلوب.</p>
-              </article>
-              <article className="ss-promise-item">
-                <Paperclip size={19} />
-                <h3>ملفاتك في مكانها</h3>
-                <p>أرسل المراجع والملفات التي تساعد على فهم طلبك.</p>
-              </article>
-              <article className="ss-promise-item">
-                <MessageCircle size={19} />
-                <h3>تواصل قريب</h3>
-                <p>متابعة مباشرة معك عبر WhatsApp عند الحاجة.</p>
-              </article>
-              <article className="ss-promise-item">
-                <WandSparkles size={19} />
-                <h3>نتيجة قابلة للاستخدام</h3>
-                <p>نرتب التسليم ليكون جاهزاً للخطوة التالية.</p>
-              </article>
             </div>
           </div>
         </section>
